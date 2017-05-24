@@ -150,6 +150,7 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             this.SetRequestHandler(ScriptRegionRequest.Type, this.HandleGetFormatScriptRegionRequest);
 
             this.SetRequestHandler(GetPSHostProcessesRequest.Type, this.HandleGetPSHostProcessesRequest);
+            this.SetRequestHandler(GetProfilePathsRequest.Type, this.HandleGetProfilePathsRequest);
             this.SetRequestHandler(CommentHelpRequest.Type, this.HandleCommentHelpRequest);
             // Initialize the extension service
             // TODO: This should be made awaited once Initialize is async!
@@ -1074,6 +1075,20 @@ function __Expand-Alias {
             }
 
             await requestContext.SendResult(psHostProcesses.ToArray());
+        }
+
+        protected async Task HandleGetProfilePathsRequest(
+            object noParams,
+            RequestContext<GetProfilePathsResponse> requestContext)
+        {
+            ProfilePaths profilePaths = this.editorSession.PowerShellContext.ProfilePaths;
+            var response = new GetProfilePathsResponse
+            {
+                CurrentUserAllHosts = profilePaths.CurrentUserAllHosts,
+                CurrentUserCurrentHost = profilePaths.CurrentUserCurrentHost
+            };
+            
+            await requestContext.SendResult(response);
         }
 
         protected async Task HandleCommentHelpRequest(

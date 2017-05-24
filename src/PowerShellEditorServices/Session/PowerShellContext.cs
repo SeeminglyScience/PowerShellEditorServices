@@ -73,6 +73,14 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         /// <summary>
+        /// Gets an object that contains the profile paths for the PowerShellContext.
+        /// </summary>
+        public ProfilePaths ProfilePaths
+        {
+            get { return this.profilePaths; }
+        }
+
+        /// <summary>
         /// Gets the current state of the session.
         /// </summary>
         public PowerShellContextState SessionState
