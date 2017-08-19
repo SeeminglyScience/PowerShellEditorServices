@@ -65,7 +65,8 @@ namespace Microsoft.PowerShell.EditorServices
             {
                 new ScriptDocumentSymbolProvider(powerShellContext.LocalPowerShellVersion.Version),
                 new PsdDocumentSymbolProvider(),
-                new PesterDocumentSymbolProvider()
+                new PesterDocumentSymbolProvider(),
+                new PowerShellDocumentSymbolProvider(logger)
             };
         }
 

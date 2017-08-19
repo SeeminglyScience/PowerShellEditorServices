@@ -62,6 +62,10 @@ namespace Microsoft.PowerShell.EditorServices.CodeLenses
                 new PesterCodeLensProvider(
                     editorSession));
 
+            codeLenses.Providers.Add(
+                new PowerShellCodeLensProvider(
+                    components.Get<ILogger>()));
+
             editorSession.Components.Register<ICodeLenses>(codeLenses);
 
             return codeLenses;
@@ -115,6 +119,16 @@ namespace Microsoft.PowerShell.EditorServices.CodeLenses
                 ICodeLensProvider originalProvider =
                     this.Providers.FirstOrDefault(
                         provider => provider.ProviderId.Equals(codeLensData.ProviderId));
+
+                if (originalProvider == null)
+                {
+                    // Check for anonymous providers
+                    originalProvider =
+                        this.Providers
+                            .OfType<PowerShellCodeLensProvider>()
+                            .FirstOrDefault(
+                                provider => provider.GetProvider(codeLensData.ProviderId) != null);
+                }
 
                 if (originalProvider != null)
                 {

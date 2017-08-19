@@ -56,6 +56,9 @@ namespace Microsoft.PowerShell.EditorServices.Symbols
             documentSymbols.Providers.Add(
                 new PesterDocumentSymbolProvider());
 
+            documentSymbols.Providers.Add(
+                new PowerShellDocumentSymbolProvider(components.Get<ILogger>()));
+
             editorSession.Components.Register<IDocumentSymbols>(documentSymbols);
 
             return documentSymbols;
