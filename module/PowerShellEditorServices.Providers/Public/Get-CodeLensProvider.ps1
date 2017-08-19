@@ -12,7 +12,7 @@ function Get-CodeLensProvider {
     end {
         $providerBase = GetPowerShellProvider -Feature CodeLenses
 
-        $providerBase.GetProviders() |
+        $providerBase.Providers |
             Where-Object ProviderId -Like $Name
     }
 }

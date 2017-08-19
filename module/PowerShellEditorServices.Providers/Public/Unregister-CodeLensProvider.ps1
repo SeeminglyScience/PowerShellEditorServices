@@ -6,7 +6,7 @@
 function Unregister-CodeLensProvider {
     [CmdletBinding()]
     param(
-        [Parameter(ValueFromPipeline)]
+        [Parameter(ValueFromPipeline, ValueFromPipelineByPropertyName)]
         [Alias('ProviderId')]
         [string]
         $Name

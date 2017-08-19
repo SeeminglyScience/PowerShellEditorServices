@@ -12,7 +12,7 @@ function Get-SymbolProvider {
     end {
         $providerBase = GetPowerShellProvider -Feature Symbols
 
-        $providerBase.GetProviders() |
+        $providerBase.Providers |
             Where-Object ProviderId -Like $Name
     }
 }
