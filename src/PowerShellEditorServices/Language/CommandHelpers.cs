@@ -52,6 +52,18 @@ namespace Microsoft.PowerShell.EditorServices
                 return null;
             }
 
+            if (powerShellContext.CurrentRunspace.Location == Session.RunspaceLocation.Local)
+            {
+                return await powerShellContext.UsingEngine<CommandInfo>(
+                    engine =>
+                    {
+                        return engine
+                            .SessionState
+                            .InvokeCommand
+                            .GetCommand(commandName, CommandTypes.All);
+                    });
+            }
+
             PSCommand command = new PSCommand();
             command.AddCommand(@"Microsoft.PowerShell.Core\Get-Command");
             command.AddArgument(commandName);

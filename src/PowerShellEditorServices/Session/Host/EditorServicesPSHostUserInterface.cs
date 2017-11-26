@@ -735,7 +735,22 @@ namespace Microsoft.PowerShell.EditorServices
                     }
                     else
                     {
-                        this.WriteOutput(string.Empty);
+                        // Invoke a tiny meaningless bit of code to keep the
+                        // pipeline active. The debugger appears hung without
+                        // this when stepping.
+                        var unusedTask2 =
+                            this.powerShellContext
+                                .ExecuteCommand<string>(
+                                    new PSCommand().AddScript("0"),
+                                    null,
+                                    new ExecutionOptions()
+                                    {
+                                        WriteErrorsToHost = false,
+                                        WriteOutputToHost = false,
+                                        AddToHistory = false,
+                                        InterruptCommandPrompt = true
+                                    })
+                                .ConfigureAwait(false);
                     }
                 }
             }

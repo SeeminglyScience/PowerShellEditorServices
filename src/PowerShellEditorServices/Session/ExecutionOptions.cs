@@ -38,6 +38,13 @@ namespace Microsoft.PowerShell.EditorServices
         /// </summary>
         public bool InterruptCommandPrompt { get; set; }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the command to
+        /// be executed is a console input prompt, such as the
+        /// PSConsoleHostReadLine function.
+        /// </summary>
+        internal bool IsReadLine { get; set; }
+
         #endregion
 
         #region Constructors
@@ -52,6 +59,7 @@ namespace Microsoft.PowerShell.EditorServices
             this.WriteErrorsToHost = true;
             this.AddToHistory = false;
             this.InterruptCommandPrompt = false;
+            this.IsReadLine = false;
         }
 
         #endregion

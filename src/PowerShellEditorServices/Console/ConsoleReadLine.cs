@@ -131,6 +131,11 @@ namespace Microsoft.PowerShell.EditorServices.Console
 
         private async Task<string> ReadLine(bool isCommandLine, CancellationToken cancellationToken)
         {
+            return await this.powerShellContext.InvokeReadLine(isCommandLine, cancellationToken);
+        }
+
+        internal async Task<string> InvokeLegacyReadLine(bool isCommandLine, CancellationToken cancellationToken)
+        {
             string inputBeforeCompletion = null;
             string inputAfterCompletion = null;
             CommandCompletion currentCompletion = null;

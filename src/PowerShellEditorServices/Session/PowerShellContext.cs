@@ -3,7 +3,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 //
 
-using Microsoft.PowerShell.EditorServices.Console;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Globalization;
@@ -46,15 +45,24 @@ namespace Microsoft.PowerShell.EditorServices
         private int pipelineThreadId;
         private TaskCompletionSource<DebuggerResumeAction> debuggerStoppedTask;
         private TaskCompletionSource<IPipelineExecutionRequest> pipelineExecutionTask;
+        private TaskCompletionSource<bool> nestedPromptExitedTask;
 
         private object runspaceMutex = new object();
-        private AsyncQueue<RunspaceHandle> runspaceWaitQueue = new AsyncQueue<RunspaceHandle>();
 
         private Stack<RunspaceDetails> runspaceStack = new Stack<RunspaceDetails>();
+
 
         #endregion
 
         #region Properties
+
+        private IPromptContext PromptContext { get; set; }
+
+        private PromptNest PromptNest { get; set; }
+
+        private InvocationEventQueue InvocationEventQueue { get; set; }
+
+        private EngineIntrinsics EngineIntrinsics { get; set; }
 
         /// <summary>
         /// Gets a boolean that indicates whether the debugger is currently stopped,
@@ -94,6 +102,8 @@ namespace Microsoft.PowerShell.EditorServices
         /// </summary>
         private IHostOutput ConsoleWriter { get; set; }
 
+        private IHostInput ConsoleReader { get; set; }
+
         /// <summary>
         /// Gets details pertaining to the current runspace.
         /// </summary>
@@ -101,6 +111,15 @@ namespace Microsoft.PowerShell.EditorServices
         {
             get;
             private set;
+        }
+
+        public bool IsAvailable
+        {
+            get
+            {
+                return
+                    SessionState == PowerShellContextState.Ready;
+            }
         }
 
         /// <summary>
@@ -140,6 +159,7 @@ namespace Microsoft.PowerShell.EditorServices
         {
             var psHost = new EditorServicesPSHost(powerShellContext, hostDetails, hostUserInterface, logger);
             powerShellContext.ConsoleWriter = hostUserInterface;
+            powerShellContext.ConsoleReader = hostUserInterface;
             return CreateRunspace(psHost);
         }
 
@@ -196,6 +216,7 @@ namespace Microsoft.PowerShell.EditorServices
             this.ownsInitialRunspace = ownsInitialRunspace;
             this.SessionState = PowerShellContextState.NotStarted;
             this.ConsoleWriter = consoleHost;
+            this.ConsoleReader = consoleHost as IHostInput;
 
             // Get the PowerShell runtime version
             this.LocalPowerShellVersion =
@@ -264,13 +285,42 @@ namespace Microsoft.PowerShell.EditorServices
             }
 
             // Now that initialization is complete we can watch for InvocationStateChanged
-            this.powerShell.InvocationStateChanged += powerShell_InvocationStateChanged;
-
             this.SessionState = PowerShellContextState.Ready;
 
+            this.EngineIntrinsics =
+                initialRunspace
+                    .SessionStateProxy
+                    .PSVariable
+                    .GetValue("ExecutionContext")
+                    as EngineIntrinsics;
+
+            PSModuleInfo readLineModule =
+                this.powerShell
+                    .AddCommand("Microsoft.PowerShell.Core\\Get-Module")
+                    .AddParameter("ListAvailable", true)
+                    .AddParameter("Name", "PSReadLine")
+                    .AddCommand("Microsoft.PowerShell.Utility\\Sort-Object")
+                    .AddParameter("Property", "Version")
+                    .AddParameter("Descending", true)
+                    .AddCommand("Microsoft.PowerShell.Utility\\Select-Object")
+                    .AddParameter("First", 1)
+                    .AddCommand("Microsoft.PowerShell.Core\\Import-Module")
+                    .AddParameter("PassThru", true)
+                    .Invoke<PSModuleInfo>()
+                    .FirstOrDefault();
+            this.powerShell.Commands.Clear();
+
             // Now that the runspace is ready, enqueue it for first use
-            RunspaceHandle runspaceHandle = new RunspaceHandle(this);
-            this.runspaceWaitQueue.EnqueueAsync(runspaceHandle).Wait();
+            this.PromptNest = new PromptNest(this, this.powerShell);
+            this.InvocationEventQueue = new InvocationEventQueue(this, this.PromptNest);
+
+            if (readLineModule != null)
+            {
+                this.PromptContext = new PSReadLinePromptContext(this, PromptNest, InvocationEventQueue);
+                return;
+            }
+
+            this.PromptContext = new LegacyReadLineContext(this);
         }
 
         /// <summary>
@@ -327,6 +377,11 @@ namespace Microsoft.PowerShell.EditorServices
             }
         }
 
+        private async Task<RunspaceHandle> GetRunspaceHandle(bool isReadLine)
+        {
+            return await this.PromptNest.GetRunspaceHandle(isReadLine);
+        }
+
         #endregion
 
         #region Public Methods
@@ -351,7 +406,7 @@ namespace Microsoft.PowerShell.EditorServices
         /// <returns>A RunspaceHandle instance that gives access to the session's runspace.</returns>
         public Task<RunspaceHandle> GetRunspaceHandle(CancellationToken cancellationToken)
         {
-            return this.runspaceWaitQueue.DequeueAsync(cancellationToken);
+            return this.PromptNest.GetRunspaceHandle(false);
         }
 
         /// <summary>
@@ -437,11 +492,16 @@ namespace Microsoft.PowerShell.EditorServices
             bool hadErrors = false;
             RunspaceHandle runspaceHandle = null;
             IEnumerable<TResult> executionResult = Enumerable.Empty<TResult>();
+            var shouldCancelReadLine =
+                executionOptions.InterruptCommandPrompt ||
+                executionOptions.WriteOutputToHost ||
+                executionOptions.IsReadLine;
 
             // If the debugger is active and the caller isn't on the pipeline
             // thread, send the command over to that thread to be executed.
             if (Thread.CurrentThread.ManagedThreadId != this.pipelineThreadId &&
-                this.pipelineExecutionTask != null)
+                this.pipelineExecutionTask != null &&
+                (!this.ShouldExecuteWithEventing(executionOptions)))
             {
                 this.logger.Write(LogLevel.Verbose, "Passing command execution to pipeline thread.");
 
@@ -454,6 +514,10 @@ namespace Microsoft.PowerShell.EditorServices
 
                 // Send the pipeline execution request to the pipeline thread
                 this.pipelineExecutionTask.SetResult(executionRequest);
+                if (shouldCancelReadLine)
+                {
+                    await this.PromptContext.AbortReadLine();
+                }
 
                 return await executionRequest.Results;
             }
@@ -473,84 +537,66 @@ namespace Microsoft.PowerShell.EditorServices
                                 endOfStatement: false));
                     }
 
-                    this.OnExecutionStatusChanged(
-                        ExecutionStatus.Running,
-                        executionOptions,
-                        false);
-
-                    if (this.CurrentRunspace.Runspace.RunspaceAvailability == RunspaceAvailability.AvailableForNestedCommand ||
-                        this.debuggerStoppedTask != null)
+                    // If a ReadLine pipeline is running we can still execute commands that
+                    // don't write output (e.g. command completion)
+                    if (this.ShouldExecuteWithEventing(executionOptions))
                     {
-                        executionResult =
-                            this.ExecuteCommandInDebugger<TResult>(
-                                psCommand,
-                                executionOptions.WriteOutputToHost);
+                        return (await this.InvocationEventQueue.ExecuteCommandOnIdle<TResult>(
+                            psCommand,
+                            errorMessages,
+                            executionOptions));
                     }
-                    else
+
+                    if (!executionOptions.IsReadLine)
                     {
-                        this.logger.Write(
-                            LogLevel.Verbose,
-                            string.Format(
-                                "Attempting to execute command(s):\r\n\r\n{0}",
-                                GetStringForPSCommand(psCommand)));
+                        this.OnExecutionStatusChanged(
+                            ExecutionStatus.Running,
+                            executionOptions,
+                            false);
+                    }
 
-                        // Set the runspace
-                        runspaceHandle = await this.GetRunspaceHandle();
-                        if (runspaceHandle.Runspace.RunspaceAvailability != RunspaceAvailability.AvailableForNestedCommand)
+                    runspaceHandle = await this.GetRunspaceHandle(executionOptions.IsReadLine);
+                    if (this.debuggerStoppedTask != null)
+                    {
+                        return this.ExecuteCommandInDebugger<TResult>(
+                            psCommand,
+                            executionOptions.WriteOutputToHost);
+                    }
+
+                    var invocationSettings = new PSInvocationSettings()
+                    {
+                        AddToHistory = executionOptions.AddToHistory
+                    };
+
+                    PowerShell shell = this.PromptNest.GetPowerShell();
+                    shell.Commands = psCommand;
+
+                    // Don't change our SessionState for ReadLine.
+                    if (!executionOptions.IsReadLine)
+                    {
+                        shell.InvocationStateChanged += powerShell_InvocationStateChanged;
+                    }
+
+                    try
+                    {
+                        // Nested PowerShell instances can't be invoked asynchronously. This occurs
+                        // in nested prompts and pipeline requests from eventing.
+                        if (shell.IsNested)
                         {
-                            this.powerShell.Runspace = runspaceHandle.Runspace;
+                            return shell.Invoke<TResult>(null, invocationSettings);
                         }
 
-                        // Invoke the pipeline on a background thread
-                        // TODO: Use built-in async invocation!
-                        executionResult =
-                            await Task.Factory.StartNew<IEnumerable<TResult>>(
-                                () =>
-                                {
-                                    Collection<TResult> result = null;
-                                    try
-                                    {
-                                        this.powerShell.Commands = psCommand;
-
-                                        PSInvocationSettings invocationSettings = new PSInvocationSettings();
-                                        invocationSettings.AddToHistory = executionOptions.AddToHistory;
-                                        result = this.powerShell.Invoke<TResult>(null, invocationSettings);
-                                    }
-                                    catch (RemoteException e)
-                                    {
-                                        if (!e.SerializedRemoteException.TypeNames[0].EndsWith("PipelineStoppedException"))
-                                        {
-                                            // Rethrow anything that isn't a PipelineStoppedException
-                                            throw e;
-                                        }
-                                    }
-
-                                    return result;
-                                },
-                                CancellationToken.None, // Might need a cancellation token
-                                TaskCreationOptions.None,
-                                TaskScheduler.Default
-                            );
-
-                        if (this.powerShell.HadErrors)
+                        return await Task.Factory.StartNew<IEnumerable<TResult>>(
+                            () => shell.Invoke<TResult>(null, invocationSettings),
+                            CancellationToken.None, // Might need a cancellation token
+                            TaskCreationOptions.None,
+                            TaskScheduler.Default);
+                    }
+                    finally
+                    {
+                        if (!executionOptions.IsReadLine)
                         {
-                            string errorMessage = "Execution completed with errors:\r\n\r\n";
-
-                            foreach (var error in this.powerShell.Streams.Error)
-                            {
-                                errorMessage += error.ToString() + "\r\n";
-                            }
-
-                            errorMessages?.Append(errorMessage);
-                            this.logger.Write(LogLevel.Error, errorMessage);
-
-                            hadErrors = true;
-                        }
-                        else
-                        {
-                            this.logger.Write(
-                                LogLevel.Verbose,
-                                "Execution completed successfully.");
+                            shell.InvocationStateChanged -= powerShell_InvocationStateChanged;
                         }
                     }
                 }
@@ -624,13 +670,13 @@ namespace Microsoft.PowerShell.EditorServices
                     {
                         runspaceHandle.Dispose();
                     }
+
+                    this.OnExecutionStatusChanged(
+                        ExecutionStatus.Completed,
+                        executionOptions,
+                        hadErrors);
                 }
             }
-
-            this.OnExecutionStatusChanged(
-                ExecutionStatus.Completed,
-                executionOptions,
-                hadErrors);
 
             return executionResult;
         }
@@ -759,8 +805,15 @@ namespace Microsoft.PowerShell.EditorServices
                 try
                 {
                     // Assume we can only debug scripts from the FileSystem provider
-                    string workingDir =
-                        this.CurrentRunspace.Runspace.SessionStateProxy.Path.CurrentFileSystemLocation.ProviderPath;
+                    string workingDir = (await ExecuteCommand<PathInfo>(
+                        new PSCommand()
+                            .AddCommand("Microsoft.PowerShell.Management\\Get-Location")
+                            .AddParameter("PSProvider", "FileSystem"),
+                            false,
+                            false))
+                        .FirstOrDefault()
+                        .ProviderPath;
+
                     workingDir = workingDir.TrimEnd(Path.DirectorySeparatorChar);
                     scriptAbsPath = workingDir + Path.DirectorySeparatorChar + script;
                 }
@@ -800,6 +853,37 @@ namespace Microsoft.PowerShell.EditorServices
                 null,
                 sendOutputToHost: true,
                 addToHistory: true);
+        }
+
+        /// <summary>
+        /// Invoke a delegate with access to the EngineIntrinsics for
+        /// the original runspace. This is mainly a test to see if it's
+        /// feasible to use in performance sensitive areas like command
+        /// completion.
+        /// </summary>
+        /// <param name="func">The delegate to invoke</param>
+        /// <returns>The return value of the provided delegate</returns>
+        internal async Task<TResult> UsingEngine<TResult>(Func<EngineIntrinsics, TResult> func)
+        {
+            return await Task<TResult>.Factory.StartNew(
+                () => func.Invoke(this.EngineIntrinsics));
+        }
+
+        internal async Task<string> InvokeReadLine(bool isCommandLine, CancellationToken cancellationToken)
+        {
+            return await PromptContext.InvokeReadLine(
+                isCommandLine,
+                cancellationToken);
+        }
+
+        private bool ShouldExecuteWithEventing(ExecutionOptions executionOptions)
+        {
+            return
+                this.PromptNest.IsReadLineBusy() &&
+                this.PromptNest.IsMainThreadBusy() &&
+                !(executionOptions.IsReadLine ||
+                executionOptions.InterruptCommandPrompt ||
+                executionOptions.WriteOutputToHost);
         }
 
         internal static TResult ExecuteScriptAndGetItem<TResult>(string scriptToExecute, Runspace runspace, TResult defaultValue = default(TResult))
@@ -935,6 +1019,8 @@ namespace Microsoft.PowerShell.EditorServices
                         LogLevel.Error,
                         $"Tried to resume debugger with action {resumeAction} but the task was already completed.");
                 }
+
+                this.PromptContext.AbortReadLine().ConfigureAwait(false);
             }
             else
             {
@@ -1056,20 +1142,75 @@ namespace Microsoft.PowerShell.EditorServices
 
         internal void ReleaseRunspaceHandle(RunspaceHandle runspaceHandle)
         {
-            Validate.IsNotNull("runspaceHandle", runspaceHandle);
+            PromptNest.ReleaseRunspaceHandle(runspaceHandle).Wait();
+        }
 
-            if (this.runspaceWaitQueue.IsEmpty)
+        internal void EnterNestedPrompt()
+        {
+            this.PromptNest.PushPromptContext();
+
+            // Save prompt info so we can return to a previous nested prompt
+            // or the debugger.
+            // TODO: This should be part of PromptNest
+            var oldThreadId = pipelineThreadId;
+            var oldExitedTask = nestedPromptExitedTask;
+            var oldExecutionTask = pipelineExecutionTask;
+            this.pipelineThreadId = Thread.CurrentThread.ManagedThreadId;
+            this.nestedPromptExitedTask = new TaskCompletionSource<bool>();
+            this.pipelineExecutionTask = new TaskCompletionSource<IPipelineExecutionRequest>();
+
+            this.OnSessionStateChanged(
+                this,
+                new SessionStateChangedEventArgs(
+                    PowerShellContextState.Ready,
+                    PowerShellExecutionResult.Stopped,
+                    null));
+
+            // Reset command loop mainly for PSReadLine
+            this.ConsoleReader.StopCommandLoop();
+            this.ConsoleReader.StartCommandLoop();
+
+            // Wait for off-thread pipeline requests and/or ExitNestedPrompt
+            while (true)
             {
-                var newRunspaceHandle = new RunspaceHandle(this);
-                this.runspaceWaitQueue.EnqueueAsync(newRunspaceHandle).Wait();
+                int taskIndex = Task.WaitAny(
+                    this.pipelineExecutionTask.Task,
+                    this.nestedPromptExitedTask.Task);
+
+                if (taskIndex == 0)
+                {
+                    var localExecutionTask = this.pipelineExecutionTask;
+                    this.pipelineExecutionTask = new TaskCompletionSource<IPipelineExecutionRequest>();
+                    localExecutionTask.Task.Result.Execute().Wait();
+                }
+                else if (taskIndex == 1)
+                {
+                    var queuedTask = this.pipelineExecutionTask;
+                    this.pipelineThreadId = oldThreadId;
+                    this.nestedPromptExitedTask = oldExitedTask;
+                    this.pipelineExecutionTask = oldExecutionTask;
+
+                    this.PromptNest.PopPromptContext();
+                    break;
+                }
+
             }
-            else
+
+            // Restart the command loop from when it was stopped in ExitNestedPrompt
+            this.ConsoleReader.StartCommandLoop();
+        }
+
+        internal void ExitNestedPrompt()
+        {
+            if (this.PromptNest.NestedPromptLevel == 1)
             {
-                // Write the situation to the log since this shouldn't happen
-                this.logger.Write(
-                    LogLevel.Error,
-                    "The PowerShellContext.runspaceWaitQueue has more than one item");
+                return;
             }
+
+            // Stop the command input loop so PSReadLine isn't invoked between ExitNestedPrompt
+            // being invoked and EnterNestedPrompt getting the message to exit.
+            this.ConsoleReader.StopCommandLoop();
+            this.nestedPromptExitedTask.SetResult(true);
         }
 
         /// <summary>
@@ -1091,15 +1232,17 @@ namespace Microsoft.PowerShell.EditorServices
         {
             this.InitialWorkingDirectory = path;
 
-            using (RunspaceHandle runspaceHandle = await this.GetRunspaceHandle())
+            if (!isPathAlreadyEscaped)
             {
-                if (!isPathAlreadyEscaped)
-                {
-                    path = EscapePath(path, false);
-                }
-
-                runspaceHandle.Runspace.SessionStateProxy.Path.SetLocation(path);
+                path = EscapePath(path, false);
             }
+
+            await ExecuteCommand<PSObject>(
+                new PSCommand().AddCommand("Set-Location").AddParameter("Path", path),
+                null,
+                false,
+                false,
+                false);
         }
 
         /// <summary>
@@ -1637,6 +1780,8 @@ namespace Microsoft.PowerShell.EditorServices
             Task<DebuggerResumeAction> localDebuggerStoppedTask = this.debuggerStoppedTask.Task;
             Task<IPipelineExecutionRequest> localPipelineExecutionTask = this.pipelineExecutionTask.Task;
 
+            PromptNest.PushPromptContext();
+
             // Update the session state
             this.OnSessionStateChanged(
                 this,
@@ -1733,6 +1878,7 @@ namespace Microsoft.PowerShell.EditorServices
             // Clear the task so that it won't be used again
             this.debuggerStoppedTask = null;
             this.pipelineExecutionTask = null;
+            PromptNest.PopPromptContext();
         }
 
         // NOTE: This event is 'internal' because the DebugService provides
@@ -1747,56 +1893,6 @@ namespace Microsoft.PowerShell.EditorServices
         #endregion
 
         #region Nested Classes
-
-        private interface IPipelineExecutionRequest
-        {
-            Task Execute();
-        }
-
-        /// <summary>
-        /// Contains details relating to a request to execute a
-        /// command on the PowerShell pipeline thread.
-        /// </summary>
-        /// <typeparam name="TResult">The expected result type of the execution.</typeparam>
-        private class PipelineExecutionRequest<TResult> : IPipelineExecutionRequest
-        {
-            PowerShellContext powerShellContext;
-            PSCommand psCommand;
-            StringBuilder errorMessages;
-            bool sendOutputToHost;
-            TaskCompletionSource<IEnumerable<TResult>> resultsTask;
-
-            public Task<IEnumerable<TResult>> Results
-            {
-                get { return this.resultsTask.Task; }
-            }
-
-            public PipelineExecutionRequest(
-                PowerShellContext powerShellContext,
-                PSCommand psCommand,
-                StringBuilder errorMessages,
-                bool sendOutputToHost)
-            {
-                this.powerShellContext = powerShellContext;
-                this.psCommand = psCommand;
-                this.errorMessages = errorMessages;
-                this.sendOutputToHost = sendOutputToHost;
-                this.resultsTask = new TaskCompletionSource<IEnumerable<TResult>>();
-            }
-
-            public async Task Execute()
-            {
-                var results =
-                    await this.powerShellContext.ExecuteCommand<TResult>(
-                        psCommand,
-                        errorMessages,
-                        sendOutputToHost);
-
-                this.resultsTask.SetResult(results);
-
-                // TODO: Deal with errors?
-            }
-        }
 
         private void ConfigureRunspaceCapabilities(RunspaceDetails runspaceDetails)
         {
