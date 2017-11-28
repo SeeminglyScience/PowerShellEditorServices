@@ -1,6 +1,6 @@
-using Microsoft.PowerShell.EditorServices.Utility;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Threading.Tasks;
+using Microsoft.PowerShell.EditorServices.Utility;
 
 namespace Microsoft.PowerShell.EditorServices.Session
 {
@@ -8,47 +8,57 @@ namespace Microsoft.PowerShell.EditorServices.Session
 
     internal class PromptNest
     {
-        private Stack<AsyncQueue<RunspaceHandle>> _mainHandleStack;
-        private Stack<PowerShell> _mainPowerShellStack;
+        private ConcurrentStack<NestFrame> _frameStack;
         private AsyncQueue<RunspaceHandle> _readLineQueue;
         private PowerShellContext _powerShellContext;
 
         internal PromptNest(PowerShellContext powerShellContext, PowerShell initialPowerShell)
         {
             _powerShellContext = powerShellContext;
-            _mainHandleStack = new Stack<AsyncQueue<RunspaceHandle>>();
-            _mainPowerShellStack = new Stack<PowerShell>();
             _readLineQueue = new AsyncQueue<RunspaceHandle>();
-            _mainHandleStack.Push(NewHandleQueue());
-            _mainPowerShellStack.Push(initialPowerShell);
             _readLineQueue.EnqueueAsync(new RunspaceHandle(powerShellContext, true)).Wait();
+            _frameStack = new ConcurrentStack<NestFrame>();
+            _frameStack.Push(
+                new NestFrame(
+                    initialPowerShell,
+                    NewHandleQueue()));
+        }
+
+        private NestFrame CurrentFrame
+        {
+            get
+            {
+                _frameStack.TryPeek(out NestFrame currentFrame);
+                return currentFrame;
+            }
         }
 
         internal void PushPromptContext()
         {
-            _mainPowerShellStack.Push(PowerShell.Create(RunspaceMode.CurrentRunspace));
-            _mainHandleStack.Push(NewHandleQueue());
+            _frameStack.Push(
+                new NestFrame(
+                    PowerShell.Create(RunspaceMode.CurrentRunspace),
+                    NewHandleQueue()));
         }
 
         internal void PopPromptContext()
         {
-            if (_mainHandleStack.Count == 1)
+            if (_frameStack.Count == 1)
             {
                 return;
             }
 
-            _mainPowerShellStack.Pop().Dispose();
-            _mainHandleStack.Pop();
+            _frameStack.TryPop(out _);
         }
 
         internal PowerShell GetPowerShell()
         {
-            return _mainPowerShellStack.Peek();
+            return CurrentFrame.PowerShell;
         }
 
         internal async Task<RunspaceHandle> GetRunspaceHandle(bool isReadLine)
         {
-            var mainHandle = await _mainHandleStack.Peek().DequeueAsync();
+            var mainHandle = await CurrentFrame.Queue.DequeueAsync();
 
             if (isReadLine)
             {
@@ -60,7 +70,7 @@ namespace Microsoft.PowerShell.EditorServices.Session
 
         internal async Task ReleaseRunspaceHandle(RunspaceHandle runspaceHandle)
         {
-            await _mainHandleStack.Peek().EnqueueAsync(new RunspaceHandle(_powerShellContext, false));
+            await CurrentFrame.Queue.EnqueueAsync(new RunspaceHandle(_powerShellContext, false));
             if (!runspaceHandle.IsReadLine)
             {
                 return;
@@ -72,8 +82,8 @@ namespace Microsoft.PowerShell.EditorServices.Session
         internal bool IsMainThreadBusy()
         {
             return
-                _mainPowerShellStack.Peek().InvocationStateInfo.State == PSInvocationState.Running
-                || _mainHandleStack.Peek().IsEmpty;
+                CurrentFrame.PowerShell.InvocationStateInfo.State == PSInvocationState.Running
+                || CurrentFrame.Queue.IsEmpty;
         }
 
         internal bool IsReadLineBusy()
@@ -81,13 +91,26 @@ namespace Microsoft.PowerShell.EditorServices.Session
             return _readLineQueue.IsEmpty;
         }
 
-        internal int NestedPromptLevel => _mainHandleStack.Count;
+        internal int NestedPromptLevel => _frameStack.Count;
 
         private AsyncQueue<RunspaceHandle> NewHandleQueue()
         {
             var queue = new AsyncQueue<RunspaceHandle>();
             queue.EnqueueAsync(new RunspaceHandle(_powerShellContext)).Wait();
             return queue;
+        }
+
+        private class NestFrame
+        {
+            internal PowerShell PowerShell { get; }
+
+            internal AsyncQueue<RunspaceHandle> Queue { get; }
+
+            internal NestFrame(PowerShell powerShell, AsyncQueue<RunspaceHandle> handleQueue)
+            {
+                PowerShell = powerShell;
+                Queue = handleQueue;
+            }
         }
     }
 }
