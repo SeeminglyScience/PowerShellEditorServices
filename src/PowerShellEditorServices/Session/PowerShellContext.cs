@@ -556,7 +556,7 @@ namespace Microsoft.PowerShell.EditorServices
                     }
 
                     runspaceHandle = await this.GetRunspaceHandle(executionOptions.IsReadLine);
-                    if (this.debuggerStoppedTask != null)
+                    if (this.debuggerStoppedTask != null && this.PromptNest.IsInDebugger)
                     {
                         return this.ExecuteCommandInDebugger<TResult>(
                             psCommand,
@@ -1526,11 +1526,11 @@ namespace Microsoft.PowerShell.EditorServices
         {
             Command outputCommand =
                 new Command(
-                    command: this.IsDebuggerStopped ? "Out-String" : "Out-Default",
+                    command: this.PromptNest.IsInDebugger ? "Out-String" : "Out-Default",
                     isScript: false,
                     useLocalScope: true);
 
-            if (this.IsDebuggerStopped)
+            if (this.PromptNest.IsInDebugger)
             {
                 // Out-String needs the -Stream parameter added
                 outputCommand.Parameters.Add("Stream");
@@ -1780,7 +1780,7 @@ namespace Microsoft.PowerShell.EditorServices
             Task<DebuggerResumeAction> localDebuggerStoppedTask = this.debuggerStoppedTask.Task;
             Task<IPipelineExecutionRequest> localPipelineExecutionTask = this.pipelineExecutionTask.Task;
 
-            PromptNest.PushPromptContext();
+            PromptNest.PushPromptContext(isDebugger: true);
 
             // Update the session state
             this.OnSessionStateChanged(

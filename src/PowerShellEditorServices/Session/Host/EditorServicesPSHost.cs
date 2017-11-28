@@ -6,6 +6,7 @@
 using Microsoft.PowerShell.EditorServices.Session;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
+using System.Management.Automation;
 using System.Management.Automation.Host;
 using System.Management.Automation.Runspaces;
 
@@ -76,6 +77,16 @@ namespace Microsoft.PowerShell.EditorServices
         public override string Name
         {
             get { return this.hostDetails.Name; }
+        }
+
+        /// <summary>
+        ///
+        /// </summary>
+        public override PSObject PrivateData
+        {
+            // There is no PrivateData yet but by returning an empty object we can get past PowerShell's
+            // check for $host.PrivateData["window"] which errors on the null returned by default.
+            get { return new PSObject(); }
         }
 
         /// <summary>

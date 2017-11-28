@@ -21,7 +21,16 @@ namespace Microsoft.PowerShell.EditorServices.Session
             _frameStack.Push(
                 new NestFrame(
                     initialPowerShell,
-                    NewHandleQueue()));
+                    NewHandleQueue(),
+                    false));
+        }
+
+        internal bool IsInDebugger
+        {
+            get
+            {
+                return CurrentFrame.IsDebugger;
+            }
         }
 
         private NestFrame CurrentFrame
@@ -33,12 +42,13 @@ namespace Microsoft.PowerShell.EditorServices.Session
             }
         }
 
-        internal void PushPromptContext()
+        internal void PushPromptContext(bool isDebugger = false)
         {
             _frameStack.Push(
                 new NestFrame(
                     PowerShell.Create(RunspaceMode.CurrentRunspace),
-                    NewHandleQueue()));
+                    NewHandleQueue(),
+                    isDebugger));
         }
 
         internal void PopPromptContext()
@@ -106,10 +116,16 @@ namespace Microsoft.PowerShell.EditorServices.Session
 
             internal AsyncQueue<RunspaceHandle> Queue { get; }
 
-            internal NestFrame(PowerShell powerShell, AsyncQueue<RunspaceHandle> handleQueue)
+            internal bool IsDebugger { get; }
+
+            internal NestFrame(
+                PowerShell powerShell,
+                AsyncQueue<RunspaceHandle> handleQueue,
+                bool isDebugger)
             {
                 PowerShell = powerShell;
                 Queue = handleQueue;
+                IsDebugger = isDebugger;
             }
         }
     }
