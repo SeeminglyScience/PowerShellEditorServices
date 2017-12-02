@@ -294,11 +294,28 @@ namespace Microsoft.PowerShell.EditorServices
                     .GetValue("ExecutionContext")
                     as EngineIntrinsics;
 
-            PSModuleInfo readLineModule =
+            // Now that the runspace is ready, enqueue it for first use
+            this.PromptNest = new PromptNest(this, this.powerShell);
+            this.InvocationEventQueue = new InvocationEventQueue(this, this.PromptNest);
+
+            // Only check for PSReadLine if the PowerShell version is high enough to use the
+            // compatible version.
+            PSModuleInfo readLineModule = null;
+            if (powerShellVersion.Major >= 5)
+            {
+                readLineModule =
                 this.powerShell
                     .AddCommand("Microsoft.PowerShell.Core\\Get-Module")
                     .AddParameter("ListAvailable", true)
                     .AddParameter("Name", "PSReadLine")
+                        .AddCommand("Microsoft.PowerShell.Core\\Where-Object")
+                        .AddParameters(
+                            new System.Collections.Hashtable()
+                            {
+                                { "Property", "Version" },
+                                { "Ge", true },
+                                { "Value", new Version(2, 0) }
+                            })
                     .AddCommand("Microsoft.PowerShell.Utility\\Sort-Object")
                     .AddParameter("Property", "Version")
                     .AddParameter("Descending", true)
@@ -309,18 +326,17 @@ namespace Microsoft.PowerShell.EditorServices
                     .Invoke<PSModuleInfo>()
                     .FirstOrDefault();
             this.powerShell.Commands.Clear();
-
-            // Now that the runspace is ready, enqueue it for first use
-            this.PromptNest = new PromptNest(this, this.powerShell);
-            this.InvocationEventQueue = new InvocationEventQueue(this, this.PromptNest);
+            }
 
             if (readLineModule != null)
             {
                 this.PromptContext = new PSReadLinePromptContext(this, PromptNest, InvocationEventQueue);
                 return;
             }
-
+            else
+            {
             this.PromptContext = new LegacyReadLineContext(this);
+        }
         }
 
         /// <summary>
