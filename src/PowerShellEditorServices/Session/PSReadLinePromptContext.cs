@@ -8,59 +8,20 @@ namespace Microsoft.PowerShell.EditorServices.Session {
 
     internal class PSReadLinePromptContext : IPromptContext {
 
-        // The current way of cancelling PSReadLine is very hacky and
-        // definitely needs to be addressed before releasing.
-        private const string CANCEL_READ_LINE_SCRIPT = @"
-
-            [System.Diagnostics.DebuggerHidden()]
-            [System.Diagnostics.DebuggerStepThrough()]
-            param()
-            end {
-                $commandText = $null
-                [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState(
-                    [ref]$commandText,
-                    [ref]$null)
-
-                [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-                if (-not [string]::IsNullOrEmpty($commandText)) {
-                    [Microsoft.PowerShell.PSConsoleReadLine]::AddToHistory($commandText)
-                }
-
-                $singleton = [Microsoft.PowerShell.PSConsoleReadline].
-                    GetField('_singleton', [System.Reflection.BindingFlags]'Static, NonPublic').
-                    GetValue($null)
-
-                $key = [System.ConsoleKeyInfo]::new(
-                    [char]13,
-                    [System.ConsoleKey]::Enter,
-                    $false,
-                    $false,
-                    $false)
-
-                [Microsoft.PowerShell.PSConsoleReadLine].
-                    GetField('_queuedKeys', [System.Reflection.BindingFlags]'Instance, NonPublic').
-                    GetValue($singleton).
-                    Enqueue($key)
-
-                $null = [Microsoft.PowerShell.PSConsoleReadline].
-                    GetField('_keyReadWaitHandle', [System.Reflection.BindingFlags]'Instance, NonPublic').
-                    GetValue($singleton).
-                    Set()
-            }";
-
         private const string READ_LINE_SCRIPT = @"
             [System.Diagnostics.DebuggerHidden()]
             [System.Diagnostics.DebuggerStepThrough()]
             param(
-                [runspace] $Runspace,
-                [System.Management.Automation.EngineIntrinsics] $EngineIntrinsics
+                [System.Threading.CancellationToken] $CancellationToken = [System.Threading.CancellationToken]::None,
+                [runspace] $Runspace = $Host.Runspace,
+                [System.Management.Automation.EngineIntrinsics] $EngineIntrinsics = $ExecutionContext
             )
             end {
-                if ($Runspace -and $EngineIntrinsics) {
-                    return [Microsoft.PowerShell.PSConsoleReadLine]::ReadLine($Runspace, $EngineIntrinsics)
+                if ($CancellationToken.IsCancellationRequested) {
+                    return [string]::Empty
                 }
 
-                return PSConsoleHostReadline
+                return [Microsoft.PowerShell.PSConsoleReadLine]::ReadLine($Runspace, $EngineIntrinsics, $CancellationToken)
             }";
 
         private readonly PowerShellContext _powerShellContext;
@@ -70,6 +31,8 @@ namespace Microsoft.PowerShell.EditorServices.Session {
         private InvocationEventQueue _invocationEventQueue;
 
         private ConsoleReadLine _consoleReadLine;
+
+        private CancellationTokenSource _readLineCancellationSource;
 
         internal PSReadLinePromptContext(
             PowerShellContext powerShellContext,
@@ -84,59 +47,60 @@ namespace Microsoft.PowerShell.EditorServices.Session {
 
         public async Task<string> InvokeReadLine(bool isCommandLine, CancellationToken cancellationToken)
         {
-            if (!isCommandLine)
+            _readLineCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var localTokenSource = _readLineCancellationSource;
+            if (localTokenSource.Token.IsCancellationRequested)
             {
-                return await _consoleReadLine.InvokeLegacyReadLine(false, cancellationToken);
+                throw new TaskCanceledException();
             }
 
-            if (_promptNest.IsReadLineBusy())
+            try
             {
-                await AbortReadLine();
-            }
-
-            cancellationToken.Register(OnReadLineCancelled);
-
-            return (await _powerShellContext.ExecuteCommand<string>(
-                new PSCommand().AddScript(READ_LINE_SCRIPT),
-                null,
-                new ExecutionOptions()
+                if (!isCommandLine)
                 {
-                    WriteErrorsToHost = false,
-                    WriteOutputToHost = false,
-                    InterruptCommandPrompt = false,
-                    AddToHistory = false,
-                    IsReadLine = isCommandLine
-                }))
-                .FirstOrDefault();
+                    return await _consoleReadLine.InvokeLegacyReadLine(
+                        false,
+                        _readLineCancellationSource.Token);
+                }
+
+                var result = (await _powerShellContext.ExecuteCommand<string>(
+                    new PSCommand()
+                        .AddScript(READ_LINE_SCRIPT)
+                        .AddArgument(_readLineCancellationSource.Token),
+                    null,
+                    new ExecutionOptions()
+                    {
+                        WriteErrorsToHost = false,
+                        WriteOutputToHost = false,
+                        InterruptCommandPrompt = false,
+                        AddToHistory = false,
+                        IsReadLine = isCommandLine
+                    }))
+                    .FirstOrDefault();
+
+                return cancellationToken.IsCancellationRequested
+                    ? string.Empty
+                    : result;
+            }
+            finally
+            {
+                _readLineCancellationSource = null;
+            }
         }
 
         public async Task AbortReadLine() {
-            if (!_promptNest.IsReadLineBusy())
+            if (_readLineCancellationSource == null)
             {
                 return;
             }
 
-            await _invocationEventQueue.ExecuteCommandOnIdle<PSObject> (
-                new PSCommand().AddScript(CANCEL_READ_LINE_SCRIPT),
-                null,
-                new ExecutionOptions() {
-                    WriteErrorsToHost = false,
-                        WriteOutputToHost = false,
-                        AddToHistory = false
-                });
+            _readLineCancellationSource.Cancel();
+
+            await WaitForReadLineExit();
         }
 
         public async Task WaitForReadLineExit () {
             using (await _promptNest.GetRunspaceHandle(true)) { }
-        }
-
-        private async void OnReadLineCancelled () {
-            if (!_promptNest.IsReadLineBusy())
-            {
-                return;
-            }
-
-            await AbortReadLine();
         }
     }
 }
