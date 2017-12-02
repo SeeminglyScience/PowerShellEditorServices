@@ -9,20 +9,27 @@ namespace Microsoft.PowerShell.EditorServices.Session
     internal class PromptNest
     {
         private ConcurrentStack<NestFrame> _frameStack;
-        private AsyncQueue<RunspaceHandle> _readLineQueue;
+        private NestFrame _readLineFrame;
         private PowerShellContext _powerShellContext;
 
         internal PromptNest(PowerShellContext powerShellContext, PowerShell initialPowerShell)
         {
             _powerShellContext = powerShellContext;
-            _readLineQueue = new AsyncQueue<RunspaceHandle>();
-            _readLineQueue.EnqueueAsync(new RunspaceHandle(powerShellContext, true)).Wait();
             _frameStack = new ConcurrentStack<NestFrame>();
             _frameStack.Push(
                 new NestFrame(
                     initialPowerShell,
                     NewHandleQueue(),
                     false));
+
+            var readLineShell = PowerShell.Create();
+            readLineShell.Runspace = powerShellContext.CurrentRunspace.Runspace;
+            _readLineFrame = new NestFrame(
+                readLineShell,
+                new AsyncQueue<RunspaceHandle>(),
+                false);
+
+            ReleaseRunspaceHandleImpl(true).Wait();
         }
 
         internal bool IsInDebugger
@@ -61,44 +68,45 @@ namespace Microsoft.PowerShell.EditorServices.Session
             _frameStack.TryPop(out _);
         }
 
-        internal PowerShell GetPowerShell()
+        internal PowerShell GetPowerShell(bool isReadLine = false)
         {
-            return CurrentFrame.PowerShell;
+            if (_frameStack.Count > 1)
+            {
+                return CurrentFrame.PowerShell;
+            }
+
+            return isReadLine ? _readLineFrame.PowerShell : CurrentFrame.PowerShell;
         }
 
         internal async Task<RunspaceHandle> GetRunspaceHandle(bool isReadLine)
         {
-            var mainHandle = await CurrentFrame.Queue.DequeueAsync();
-
-            if (isReadLine)
+            // Also grab the main runspace handle if this is for a ReadLine pipeline and the runspace
+            // is in process.
+            if (isReadLine && !_powerShellContext.IsCurrentRunspaceOutOfProcess())
             {
-                return await _readLineQueue.DequeueAsync();
+                await GetRunspaceHandleImpl(false);
             }
 
-            return mainHandle;
+            return await GetRunspaceHandleImpl(isReadLine);
         }
 
         internal async Task ReleaseRunspaceHandle(RunspaceHandle runspaceHandle)
         {
-            await CurrentFrame.Queue.EnqueueAsync(new RunspaceHandle(_powerShellContext, false));
-            if (!runspaceHandle.IsReadLine)
+            await ReleaseRunspaceHandleImpl(runspaceHandle.IsReadLine);
+            if (runspaceHandle.IsReadLine && !_powerShellContext.IsCurrentRunspaceOutOfProcess())
             {
-                return;
+                await ReleaseRunspaceHandleImpl(false);
             }
-
-            await _readLineQueue.EnqueueAsync(new RunspaceHandle(_powerShellContext, true));
         }
 
         internal bool IsMainThreadBusy()
         {
-            return
-                CurrentFrame.PowerShell.InvocationStateInfo.State == PSInvocationState.Running
-                || CurrentFrame.Queue.IsEmpty;
+            return CurrentFrame.Queue.IsEmpty;
         }
 
         internal bool IsReadLineBusy()
         {
-            return _readLineQueue.IsEmpty;
+            return _readLineFrame.Queue.IsEmpty;
         }
 
         internal int NestedPromptLevel => _frameStack.Count;
@@ -108,6 +116,27 @@ namespace Microsoft.PowerShell.EditorServices.Session
             var queue = new AsyncQueue<RunspaceHandle>();
             queue.EnqueueAsync(new RunspaceHandle(_powerShellContext)).Wait();
             return queue;
+        }
+
+        private async Task<RunspaceHandle> GetRunspaceHandleImpl(bool isReadLine)
+        {
+            if (isReadLine)
+            {
+                return await _readLineFrame.Queue.DequeueAsync();
+            }
+
+            return await CurrentFrame.Queue.DequeueAsync();
+        }
+
+        private async Task ReleaseRunspaceHandleImpl(bool isReadLine)
+        {
+            if (isReadLine)
+            {
+                await _readLineFrame.Queue.EnqueueAsync(new RunspaceHandle(_powerShellContext, true));
+                return;
+            }
+
+            await CurrentFrame.Queue.EnqueueAsync(new RunspaceHandle(_powerShellContext, false));
         }
 
         private class NestFrame

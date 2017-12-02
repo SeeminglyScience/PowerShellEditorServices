@@ -88,29 +88,56 @@ namespace Microsoft.PowerShell.EditorServices
                 return null;
             }
 
-            PSCommand command = new PSCommand();
-            command.AddCommand("TabExpansion2");
-            command.AddParameter("Ast", scriptAst);
-            command.AddParameter("Tokens", currentTokens);
-            command.AddParameter("PositionOfCursor", cursorPosition);
-            command.AddParameter("Options", null);
-
-            PSObject outputObject =
-                (await powerShellContext.ExecuteCommand<PSObject>(command, false, false))
-                    .FirstOrDefault();
-
-            if (outputObject != null)
+            if (powerShellContext.IsCurrentRunspaceOutOfProcess())
             {
-                ErrorRecord errorRecord = outputObject.BaseObject as ErrorRecord;
-                if (errorRecord != null)
+
+                using (RunspaceHandle runspaceHandle = await powerShellContext.GetRunspaceHandle(cancellationToken))
+                using (PowerShell powerShell = PowerShell.Create())
                 {
-                    logger.WriteException(
-                        "Encountered an error while invoking TabExpansion2 in the debugger",
-                        errorRecord.Exception);
+                    powerShell.Runspace = runspaceHandle.Runspace;
+
+                    Stopwatch stopwatch = new Stopwatch();
+                    stopwatch.Start();
+
+                    commandCompletion =
+                        CommandCompletion.CompleteInput(
+                            scriptAst,
+                            currentTokens,
+                            cursorPosition,
+                            null,
+                            powerShell);
+
+                    stopwatch.Stop();
+
+                    logger.Write(LogLevel.Verbose, $"IntelliSense completed in {stopwatch.ElapsedMilliseconds}ms.");
                 }
-                else
+            }
+            else
+            {
+                PSCommand command = new PSCommand();
+                command.AddCommand("TabExpansion2");
+                command.AddParameter("Ast", scriptAst);
+                command.AddParameter("Tokens", currentTokens);
+                command.AddParameter("PositionOfCursor", cursorPosition);
+                command.AddParameter("Options", null);
+
+                PSObject outputObject =
+                    (await powerShellContext.ExecuteCommand<PSObject>(command, false, false))
+                        .FirstOrDefault();
+
+                if (outputObject != null)
                 {
-                    commandCompletion = outputObject.BaseObject as CommandCompletion;
+                    ErrorRecord errorRecord = outputObject.BaseObject as ErrorRecord;
+                    if (errorRecord != null)
+                    {
+                        logger.WriteException(
+                            "Encountered an error while invoking TabExpansion2 in the debugger",
+                            errorRecord.Exception);
+                    }
+                    else
+                    {
+                        commandCompletion = outputObject.BaseObject as CommandCompletion;
+                    }
                 }
             }
 

@@ -10,6 +10,8 @@ namespace Microsoft.PowerShell.EditorServices
     /// </summary>
     public class ExecutionOptions
     {
+        private bool? _shouldExecuteInOriginalRunspace;
+
         #region Properties
 
         /// <summary>
@@ -44,6 +46,26 @@ namespace Microsoft.PowerShell.EditorServices
         /// PSConsoleHostReadLine function.
         /// </summary>
         internal bool IsReadLine { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the command should
+        /// be invoked in the original runspace. In the majority of cases
+        /// this should remain unset.
+        /// </summary>
+        internal bool ShouldExecuteInOriginalRunspace
+        {
+            get
+            {
+                return
+                    _shouldExecuteInOriginalRunspace.HasValue
+                        ? _shouldExecuteInOriginalRunspace.Value
+                        : IsReadLine;
+            }
+            set
+            {
+                _shouldExecuteInOriginalRunspace = value;
+            }
+        }
 
         #endregion
 

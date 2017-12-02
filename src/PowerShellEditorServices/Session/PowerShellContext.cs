@@ -304,10 +304,10 @@ namespace Microsoft.PowerShell.EditorServices
             if (powerShellVersion.Major >= 5)
             {
                 readLineModule =
-                this.powerShell
-                    .AddCommand("Microsoft.PowerShell.Core\\Get-Module")
-                    .AddParameter("ListAvailable", true)
-                    .AddParameter("Name", "PSReadLine")
+                    this.powerShell
+                        .AddCommand("Microsoft.PowerShell.Core\\Get-Module")
+                        .AddParameter("ListAvailable", true)
+                        .AddParameter("Name", "PSReadLine")
                         .AddCommand("Microsoft.PowerShell.Core\\Where-Object")
                         .AddParameters(
                             new System.Collections.Hashtable()
@@ -316,16 +316,16 @@ namespace Microsoft.PowerShell.EditorServices
                                 { "Ge", true },
                                 { "Value", new Version(2, 0) }
                             })
-                    .AddCommand("Microsoft.PowerShell.Utility\\Sort-Object")
-                    .AddParameter("Property", "Version")
-                    .AddParameter("Descending", true)
-                    .AddCommand("Microsoft.PowerShell.Utility\\Select-Object")
-                    .AddParameter("First", 1)
-                    .AddCommand("Microsoft.PowerShell.Core\\Import-Module")
-                    .AddParameter("PassThru", true)
-                    .Invoke<PSModuleInfo>()
-                    .FirstOrDefault();
-            this.powerShell.Commands.Clear();
+                        .AddCommand("Microsoft.PowerShell.Utility\\Sort-Object")
+                        .AddParameter("Property", "Version")
+                        .AddParameter("Descending", true)
+                        .AddCommand("Microsoft.PowerShell.Utility\\Select-Object")
+                        .AddParameter("First", 1)
+                        .AddCommand("Microsoft.PowerShell.Core\\Import-Module")
+                        .AddParameter("PassThru", true)
+                        .Invoke<PSModuleInfo>()
+                        .FirstOrDefault();
+                this.powerShell.Commands.Clear();
             }
 
             if (readLineModule != null)
@@ -335,8 +335,8 @@ namespace Microsoft.PowerShell.EditorServices
             }
             else
             {
-            this.PromptContext = new LegacyReadLineContext(this);
-        }
+                this.PromptContext = new LegacyReadLineContext(this);
+            }
         }
 
         /// <summary>
@@ -510,8 +510,7 @@ namespace Microsoft.PowerShell.EditorServices
             IEnumerable<TResult> executionResult = Enumerable.Empty<TResult>();
             var shouldCancelReadLine =
                 executionOptions.InterruptCommandPrompt ||
-                executionOptions.WriteOutputToHost ||
-                executionOptions.IsReadLine;
+                executionOptions.WriteOutputToHost;
 
             // If the debugger is active and the caller isn't on the pipeline
             // thread, send the command over to that thread to be executed.
@@ -526,12 +525,15 @@ namespace Microsoft.PowerShell.EditorServices
                         this,
                         psCommand,
                         errorMessages,
-                        executionOptions.WriteOutputToHost);
+                        executionOptions);
 
                 // Send the pipeline execution request to the pipeline thread
                 this.pipelineExecutionTask.SetResult(executionRequest);
-                if (shouldCancelReadLine)
+                if (shouldCancelReadLine && PromptNest.IsReadLineBusy())
                 {
+                    // If a ReadLine pipeline is running in the debugger then we'll hang here
+                    // if we don't cancel it. Typically we can rely on OnExecutionStatusChanged but
+                    // the pipeline request won't even start without clearing the current task.
                     await this.PromptContext.AbortReadLine();
                 }
 
@@ -584,7 +586,7 @@ namespace Microsoft.PowerShell.EditorServices
                         AddToHistory = executionOptions.AddToHistory
                     };
 
-                    PowerShell shell = this.PromptNest.GetPowerShell();
+                    PowerShell shell = this.PromptNest.GetPowerShell(executionOptions.IsReadLine);
                     shell.Commands = psCommand;
 
                     // Don't change our SessionState for ReadLine.
@@ -592,6 +594,10 @@ namespace Microsoft.PowerShell.EditorServices
                     {
                         shell.InvocationStateChanged += powerShell_InvocationStateChanged;
                     }
+
+                    shell.Runspace = executionOptions.ShouldExecuteInOriginalRunspace
+                        ? this.initialRunspace.Runspace
+                        : this.CurrentRunspace.Runspace;
 
                     try
                     {
@@ -899,7 +905,8 @@ namespace Microsoft.PowerShell.EditorServices
                 this.PromptNest.IsMainThreadBusy() &&
                 !(executionOptions.IsReadLine ||
                 executionOptions.InterruptCommandPrompt ||
-                executionOptions.WriteOutputToHost);
+                executionOptions.WriteOutputToHost ||
+                IsCurrentRunspaceOutOfProcess());
         }
 
         internal static TResult ExecuteScriptAndGetItem<TResult>(string scriptToExecute, Runspace runspace, TResult defaultValue = default(TResult))
@@ -1159,6 +1166,13 @@ namespace Microsoft.PowerShell.EditorServices
         internal void ReleaseRunspaceHandle(RunspaceHandle runspaceHandle)
         {
             PromptNest.ReleaseRunspaceHandle(runspaceHandle).Wait();
+        }
+
+        internal bool IsCurrentRunspaceOutOfProcess()
+        {
+            return
+                CurrentRunspace.Context == RunspaceContext.EnteredProcess ||
+                CurrentRunspace.Location == RunspaceLocation.Remote;
         }
 
         internal void EnterNestedPrompt()

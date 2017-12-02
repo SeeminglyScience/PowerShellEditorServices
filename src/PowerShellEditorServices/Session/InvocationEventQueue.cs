@@ -56,7 +56,7 @@ namespace Microsoft.PowerShell.EditorServices.Session
                 _powerShellContext,
                 psCommand,
                 errorMessages,
-                false);
+                executionOptions);
 
             _pipelineRequest = request;
 

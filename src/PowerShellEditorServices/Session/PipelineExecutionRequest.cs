@@ -22,7 +22,7 @@ namespace Microsoft.PowerShell.EditorServices.Session
         private PowerShellContext _powerShellContext;
         private PSCommand _psCommand;
         private StringBuilder _errorMessages;
-        private bool _sendOutputToHost;
+        private ExecutionOptions _executionOptions;
         private TaskCompletionSource<IEnumerable<TResult>> _resultsTask;
 
         public Task<IEnumerable<TResult>> Results
@@ -37,11 +37,27 @@ namespace Microsoft.PowerShell.EditorServices.Session
             PSCommand psCommand,
             StringBuilder errorMessages,
             bool sendOutputToHost)
+            : this(
+                powerShellContext,
+                psCommand,
+                errorMessages,
+                new ExecutionOptions()
+                {
+                    WriteOutputToHost = sendOutputToHost
+                })
+            { }
+
+
+        public PipelineExecutionRequest(
+            PowerShellContext powerShellContext,
+            PSCommand psCommand,
+            StringBuilder errorMessages,
+            ExecutionOptions executionOptions)
         {
             _powerShellContext = powerShellContext;
             _psCommand = psCommand;
             _errorMessages = errorMessages;
-            _sendOutputToHost = sendOutputToHost;
+            _executionOptions = executionOptions;
             _resultsTask = new TaskCompletionSource<IEnumerable<TResult>>();
         }
 
@@ -51,7 +67,7 @@ namespace Microsoft.PowerShell.EditorServices.Session
                 await _powerShellContext.ExecuteCommand<TResult>(
                     _psCommand,
                     _errorMessages,
-                    _sendOutputToHost);
+                    _executionOptions);
 
             _resultsTask.SetResult(results);
             // TODO: Deal with errors?
