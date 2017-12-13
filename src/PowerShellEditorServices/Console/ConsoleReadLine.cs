@@ -5,6 +5,7 @@
 
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -61,7 +62,7 @@ namespace Microsoft.PowerShell.EditorServices.Console
             {
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    ConsoleKeyInfo keyInfo = await this.ReadKeyAsync(cancellationToken);
+                    ConsoleKeyInfo keyInfo = await ReadKeyAsync(cancellationToken);
 
                     if ((int)keyInfo.Key == 3 ||
                         keyInfo.Key == ConsoleKey.C && keyInfo.Modifiers.HasFlag(ConsoleModifiers.Control))
@@ -129,6 +130,58 @@ namespace Microsoft.PowerShell.EditorServices.Console
 
         #region Private Methods
 
+        private static async Task<ConsoleKeyInfo> ReadKeyAsync(CancellationToken token)
+        {
+            await WaitForKeyAvailableAsync(token);
+            return Console.ReadKey(true);
+        }
+
+        private static async Task WaitForKeyAvailableAsync(CancellationToken token)
+        {
+            DisableInputEcho();
+            try
+            {
+                while (!Console.KeyAvailable)
+                {
+                    await Task.Delay(50, token);
+                }
+            }
+            finally
+            {
+                EnableInputEcho();
+            }
+        }
+
+        private static void DisableInputEcho()
+        {
+            #if CoreCLR
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                return;
+            }
+
+            InitializeConsoleBeforeRead(0, 10);
+            #endif
+        }
+
+        private static void EnableInputEcho()
+        {
+            #if CoreCLR
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                return;
+            }
+
+            UninitializeConsoleAfterRead();
+            #endif
+        }
+
+        [DllImport("libdisablekeyecho.so")]
+        private static extern void InitializeConsoleBeforeRead(byte minChars = 1, byte decisecondsTimeout = 0);
+
+        [DllImport("libdisablekeyecho.so")]
+        private static extern void UninitializeConsoleAfterRead();
+
         private async Task<string> ReadLine(bool isCommandLine, CancellationToken cancellationToken)
         {
             string inputBeforeCompletion = null;
@@ -154,7 +207,7 @@ namespace Microsoft.PowerShell.EditorServices.Console
             {
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    ConsoleKeyInfo keyInfo = await this.ReadKeyAsync(cancellationToken);
+                    ConsoleKeyInfo keyInfo = await ReadKeyAsync(cancellationToken);
 
                     // Do final position calculation after the key has been pressed
                     // because the window could have been resized before then
@@ -464,41 +517,6 @@ namespace Microsoft.PowerShell.EditorServices.Console
             }
 
             return null;
-        }
-
-        private async Task<ConsoleKeyInfo> ReadKeyAsync(CancellationToken cancellationToken)
-        {
-            return await
-                Task.Factory.StartNew(
-                    () =>
-                    {
-                        ConsoleKeyInfo keyInfo;
-
-                        lock (this.readKeyLock)
-                        {
-                            if (cancellationToken.IsCancellationRequested)
-                            {
-                                throw new TaskCanceledException();
-                            }
-                            else if (this.bufferedKey.HasValue)
-                            {
-                                keyInfo = this.bufferedKey.Value;
-                                this.bufferedKey = null;
-                            }
-                            else
-                            {
-                                keyInfo = Console.ReadKey(true);
-
-                                if (cancellationToken.IsCancellationRequested)
-                                {
-                                    this.bufferedKey = keyInfo;
-                                    throw new TaskCanceledException();
-                                }
-                            }
-                        }
-
-                        return keyInfo;
-                    });
         }
 
         private int CalculateIndexFromCursor(

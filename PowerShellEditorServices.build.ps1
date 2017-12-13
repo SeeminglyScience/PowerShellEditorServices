@@ -85,10 +85,19 @@ task Clean {
     exec { & $script:dotnetExe clean }
     Remove-Item $PSScriptRoot\module\PowerShellEditorServices\bin -Recurse -Force -ErrorAction Ignore
     Remove-Item $PSScriptRoot\module\PowerShellEditorServices.VSCode\bin -Recurse -Force -ErrorAction Ignore
+    Remove-Item $PSScriptRoot/src/Native/Unix/build -Recurse -Force -ErrorAction Ignore
     Get-ChildItem -Recurse $PSScriptRoot\src\*.nupkg | Remove-Item -Force -ErrorAction Ignore
     Get-ChildItem $PSScriptRoot\PowerShellEditorServices*.zip | Remove-Item -Force -ErrorAction Ignore
     Get-ChildItem $PSScriptRoot\module\PowerShellEditorServices\Commands\en-US\*-help.xml | Remove-Item -Force -ErrorAction Ignore
 }
+
+task BuildNative -If { $IsUnix } -Before Build {
+    New-Item $PSScriptRoot/src/Native/Unix/build -ItemType Directory | Out-Null
+
+    g++ -o $PSScriptRoot/src/Native/Unix/build/libdisablekeyecho.o $PSScriptRoot/src/Native/Unix/disable_key_echo.cpp -std=c++0x -c -fpic
+    g++ -shared -o $PSScriptRoot/src/Native/Unix/build/libdisablekeyecho.so $PSScriptRoot/src/Native/Unix/build/libdisablekeyecho.o
+}
+
 
 task GetProductVersion -Before PackageNuGet, PackageModule, UploadArtifacts {
     [xml]$props = Get-Content .\PowerShellEditorServices.Common.props
@@ -188,6 +197,8 @@ task LayoutModule -After Build {
     if (!$script:IsUnix) {
         Copy-Item -Force -Path $PSScriptRoot\src\PowerShellEditorServices.Host\bin\$Configuration\net451\* -Filter Microsoft.PowerShell.EditorServices*.dll -Destination $PSScriptRoot\module\PowerShellEditorServices\bin\Desktop\
         Copy-Item -Force -Path $PSScriptRoot\src\PowerShellEditorServices.Host\bin\$Configuration\net451\Newtonsoft.Json.dll -Destination $PSScriptRoot\module\PowerShellEditorServices\bin\Desktop\
+    } else {
+        Copy-Item -Force -Path $PSScriptRoot\src\Native\Unix\build\libdisablekeyecho.so $PSScriptRoot\module\PowerShellEditorServices\bin\Core
     }
 
     # Lay out the PowerShellEditorServices.VSCode module's binaries
