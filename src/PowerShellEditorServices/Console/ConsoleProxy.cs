@@ -61,6 +61,42 @@ namespace Microsoft.PowerShell.EditorServices.Console
         public static Task<int> GetCursorTopAsync(CancellationToken cancellationToken) =>
             s_consoleProxy.GetCursorTopAsync(cancellationToken);
 
+        internal static void SetCursorPosition(int left, int top) =>
+            s_consoleProxy.SetCursorPosition(left, top);
+
+        internal static Task SetCursorPositionAsync(int left, int top) =>
+            s_consoleProxy.SetCursorPositionAsync(left, top);
+
+        internal static void Write(char value) =>
+            s_consoleProxy.Write(value);
+
+        internal static Task WriteAsync(char value) =>
+            s_consoleProxy.WriteAsync(value);
+
+        internal static void Write(string value) =>
+            s_consoleProxy.Write(value);
+
+        internal static Task WriteAsync(string value) =>
+            s_consoleProxy.WriteAsync(value);
+
+        internal static int GetWindowLeft() =>
+            s_consoleProxy.GetWindowLeft();
+
+        internal static Task<int> GetWindowLeftAsync() =>
+            s_consoleProxy.GetWindowLeftAsync();
+
+        internal static int GetWindowTop() =>
+            s_consoleProxy.GetWindowTop();
+
+        internal static Task<int> GetWindowTopAsync() =>
+            s_consoleProxy.GetWindowTopAsync();
+
+        internal static int GetWindowWidth() =>
+            s_consoleProxy.GetWindowWidth();
+
+        internal static Task<int> GetWindowWidthAsync() =>
+            s_consoleProxy.GetWindowWidthAsync();
+
         /// <summary>
         /// On Unix platforms this method is sent to PSReadLine as a work around for issues
         /// with the System.Console implementation for that platform. Functionally it is the

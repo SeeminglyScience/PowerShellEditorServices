@@ -44,6 +44,124 @@ namespace Microsoft.PowerShell.EditorServices.Console
         int GetCursorLeft(CancellationToken cancellationToken);
 
         /// <summary>
+        /// Sets the Cursor's Position. Use this method instead of
+        /// <see cref="System.Console.SetCursorPosition" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="left">The column where the cursor should go.</param>
+        /// <param name="top">The row where the cursor should go.</param>
+        void SetCursorPosition(int left, int top);
+
+        /// <summary>
+        /// Sets the Cursor's Position. Use this method instead of
+        /// <see cref="System.Console.SetCursorPosition" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="left">The column where the cursor should go.</param>
+        /// <param name="top">The row where the cursor should go.</param>
+        Task SetCursorPositionAsync(int left, int top);
+
+        /// <summary>
+        /// Sets the Cursor's Position. Use this method instead of
+        /// <see cref="System.Console.SetCursorPosition" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="left">The column where the cursor should go.</param>
+        /// <param name="top">The row where the cursor should go.</param>
+        /// <param name="cancellationToken">The <see cref="CancellationToken" /> to observe.</param>
+        void SetCursorPosition(int left, int top, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Sets the Cursor's Position. Use this method instead of
+        /// <see cref="System.Console.SetCursorPosition" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="left">The column where the cursor should go.</param>
+        /// <param name="top">The row where the cursor should go.</param>
+        /// <param name="cancellationToken">The <see cref="CancellationToken" /> to observe.</param>
+        Task SetCursorPositionAsync(int left, int top, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Writes to stdout. Use this method instead of
+        /// <see cref="System.Console.Write" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="value">The character to write.</param>
+        void Write(char value);
+
+        /// <summary>
+        /// Writes to stdout. Use this method instead of
+        /// <see cref="System.Console.Write" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="value">The character to write.</param>
+        Task WriteAsync(char value);
+
+        /// <summary>
+        /// Writes to stdout. Use this method instead of
+        /// <see cref="System.Console.Write" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="value">The character to write.</param>
+        /// <param name="cancellationToken">The <see cref="CancellationToken" /> to observe.</param>
+        void Write(char value, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Writes to stdout. Use this method instead of
+        /// <see cref="System.Console.Write" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="value">The character to write.</param>
+        /// <param name="cancellationToken">The <see cref="CancellationToken" /> to observe.</param>
+        Task WriteAsync(char value, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Writes to stdout. Use this method instead of
+        /// <see cref="System.Console.Write" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="value">The string to write.</param>
+        void Write(string value);
+
+        /// <summary>
+        /// Writes to stdout. Use this method instead of
+        /// <see cref="System.Console.Write" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="value">The string to write.</param>
+        Task WriteAsync(string value);
+
+        /// <summary>
+        /// Writes to stdout. Use this method instead of
+        /// <see cref="System.Console.Write" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="value">The string to write.</param>
+        /// <param name="cancellationToken">The <see cref="CancellationToken" /> to observe.</param>
+        void Write(string value, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Writes to stdout. Use this method instead of
+        /// <see cref="System.Console.Write" /> to avoid triggering pending calls
+        /// to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
+        /// on Unix platforms.
+        /// </summary>
+        /// <param name="value">The string to write.</param>
+        /// <param name="cancellationToken">The <see cref="CancellationToken" /> to observe.</param>
+        Task WriteAsync(string value, CancellationToken cancellationToken);
+
+        /// <summary>
         /// Obtains the horizontal position of the console cursor. Use this method
         /// instead of <see cref="System.Console.CursorLeft" /> to avoid triggering
         /// pending calls to <see cref="IConsoleOperations.ReadKeyAsync(CancellationToken)" />
@@ -115,5 +233,20 @@ namespace Microsoft.PowerShell.EditorServices.Console
         /// of the console cursor.
         /// </returns>
         Task<int> GetCursorTopAsync(CancellationToken cancellationToken);
+
+        int GetWindowLeft();
+        Task<int> GetWindowLeftAsync();
+        int GetWindowLeft(CancellationToken cancellationToken);
+        Task<int> GetWindowLeftAsync(CancellationToken cancellationToken);
+
+        int GetWindowTop();
+        Task<int> GetWindowTopAsync();
+        int GetWindowTop(CancellationToken cancellationToken);
+        Task<int> GetWindowTopAsync(CancellationToken cancellationToken);
+
+        int GetWindowWidth();
+        Task<int> GetWindowWidthAsync();
+        int GetWindowWidth(CancellationToken cancellationToken);
+        Task<int> GetWindowWidthAsync(CancellationToken cancellationToken);
     }
 }
