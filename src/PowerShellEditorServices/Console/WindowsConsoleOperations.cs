@@ -32,6 +32,30 @@ namespace Microsoft.PowerShell.EditorServices.Console
 
         public Task<int> GetCursorTopAsync(CancellationToken cancellationToken) => Task.FromResult(System.Console.CursorTop);
 
+        public int GetWindowLeft() => System.Console.WindowLeft;
+
+        public Task<int> GetWindowLeftAsync() => Task.FromResult(System.Console.WindowLeft);
+
+        public int GetWindowLeft(CancellationToken cancellationToken) => System.Console.WindowLeft;
+
+        public Task<int> GetWindowLeftAsync(CancellationToken cancellationToken) => Task.FromResult(System.Console.WindowLeft);
+
+        public int GetWindowTop() => System.Console.WindowTop;
+
+        public Task<int> GetWindowTopAsync() => Task.FromResult(System.Console.WindowTop);
+
+        public int GetWindowTop(CancellationToken cancellationToken) => System.Console.WindowTop;
+
+        public Task<int> GetWindowTopAsync(CancellationToken cancellationToken) => Task.FromResult(System.Console.WindowTop);
+
+        public int GetWindowWidth() => System.Console.WindowWidth;
+
+        public Task<int> GetWindowWidthAsync() => Task.FromResult(System.Console.WindowWidth);
+
+        public int GetWindowWidth(CancellationToken cancellationToken) => System.Console.WindowWidth;
+
+        public Task<int> GetWindowWidthAsync(CancellationToken cancellationToken) => Task.FromResult(System.Console.WindowWidth);
+
         public async Task<ConsoleKeyInfo> ReadKeyAsync(CancellationToken cancellationToken)
         {
             await _readKeyHandle.WaitAsync(cancellationToken);
@@ -51,6 +75,55 @@ namespace Microsoft.PowerShell.EditorServices.Console
                 cancellationToken.ThrowIfCancellationRequested();
                 _bufferedKey = null;
             }
+        }
+
+        public void SetCursorPosition(int left, int top) => System.Console.SetCursorPosition(left, top);
+
+        public Task SetCursorPositionAsync(int left, int top)
+        {
+            System.Console.SetCursorPosition(left, top);
+            return Task.CompletedTask;
+        }
+
+        public void SetCursorPosition(int left, int top, CancellationToken cancellationToken) =>
+            System.Console.SetCursorPosition(left, top);
+
+        public Task SetCursorPositionAsync(int left, int top, CancellationToken cancellationToken)
+        {
+            System.Console.SetCursorPosition(left, top);
+            return Task.CompletedTask;
+        }
+
+        public void Write(char value) => System.Console.Write(value);
+
+        public Task WriteAsync(char value)
+        {
+            System.Console.Write(value);
+            return Task.CompletedTask;
+        }
+
+        public void Write(char value, CancellationToken cancellationToken) => System.Console.Write(value);
+
+        public Task WriteAsync(char value, CancellationToken cancellationToken)
+        {
+            System.Console.Write(value);
+            return Task.CompletedTask;
+        }
+
+        public void Write(string value) => System.Console.Write(value);
+
+        public Task WriteAsync(string value)
+        {
+            System.Console.Write(value);
+            return Task.CompletedTask;
+        }
+
+        public void Write(string value, CancellationToken cancellationToken) => System.Console.Write(value);
+
+        public Task WriteAsync(string value, CancellationToken cancellationToken)
+        {
+            System.Console.Write(value);
+            return Task.CompletedTask;
         }
     }
 }

@@ -91,11 +91,11 @@ namespace Microsoft.PowerShell.EditorServices.Console
 
                     // Re-render the secure string characters
                     int currentInputLength = secureString.Length;
-                    int consoleWidth = Console.WindowWidth;
+                    int consoleWidth = await ConsoleProxy.GetWindowWidthAsync();
 
                     if (currentInputLength > previousInputLength)
                     {
-                        Console.Write('*');
+                        await ConsoleProxy.WriteAsync('*');
                     }
                     else if (previousInputLength > 0 && currentInputLength < previousInputLength)
                     {
@@ -110,9 +110,9 @@ namespace Microsoft.PowerShell.EditorServices.Console
                             row--;
                         }
 
-                        Console.SetCursorPosition(col, row);
-                        Console.Write(' ');
-                        Console.SetCursorPosition(col, row);
+                        await ConsoleProxy.SetCursorPositionAsync(col, row);
+                        await ConsoleProxy.WriteAsync(' ');
+                        await ConsoleProxy.SetCursorPositionAsync(col, row);
                     }
 
                     previousInputLength = currentInputLength;
@@ -169,8 +169,8 @@ namespace Microsoft.PowerShell.EditorServices.Console
             int initialCursorCol = await ConsoleProxy.GetCursorLeftAsync(cancellationToken);
             int initialCursorRow = await ConsoleProxy.GetCursorTopAsync(cancellationToken);
 
-            int initialWindowLeft = Console.WindowLeft;
-            int initialWindowTop = Console.WindowTop;
+            int initialWindowLeft = await ConsoleProxy.GetWindowLeftAsync();
+            int initialWindowTop = await ConsoleProxy.GetWindowTopAsync();
 
             int currentCursorIndex = 0;
 
@@ -186,7 +186,7 @@ namespace Microsoft.PowerShell.EditorServices.Console
                     // because the window could have been resized before then
                     int promptStartCol = initialCursorCol;
                     int promptStartRow = initialCursorRow;
-                    int consoleWidth = Console.WindowWidth;
+                    int consoleWidth = await ConsoleProxy.GetWindowWidthAsync();
 
                     if ((int)keyInfo.Key == 3 ||
                         keyInfo.Key == ConsoleKey.C && keyInfo.Modifiers.HasFlag(ConsoleModifiers.Control))
@@ -525,7 +525,7 @@ namespace Microsoft.PowerShell.EditorServices.Console
             int replaceLength = 0,
             int finalCursorIndex = -1)
         {
-            int consoleWidth = Console.WindowWidth;
+            int consoleWidth = ConsoleProxy.GetWindowWidth();
             int previousInputLength = inputLine.Length;
 
             if (insertIndex == -1)
@@ -556,14 +556,14 @@ namespace Microsoft.PowerShell.EditorServices.Console
             }
 
             // Re-render affected section
-            Console.Write(
+            ConsoleProxy.Write(
                 inputLine.ToString(
                     insertIndex,
                     inputLine.Length - insertIndex));
 
             if (inputLine.Length < previousInputLength)
             {
-                Console.Write(
+                ConsoleProxy.Write(
                     new string(
                         ' ',
                         previousInputLength - inputLine.Length));
@@ -609,7 +609,7 @@ namespace Microsoft.PowerShell.EditorServices.Console
                 out int newCursorCol,
                 out int newCursorRow);
 
-            Console.SetCursorPosition(newCursorCol, newCursorRow);
+            ConsoleProxy.SetCursorPosition(newCursorCol, newCursorRow);
 
             return newCursorIndex;
         }

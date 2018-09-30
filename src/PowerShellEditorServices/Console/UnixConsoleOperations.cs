@@ -280,5 +280,221 @@ namespace Microsoft.PowerShell.EditorServices.Console
                 s_stdInHandle.Release();
             }
         }
+
+        public void SetCursorPosition(int left, int top)
+        {
+            SetCursorPosition(left, top, CancellationToken.None);
+        }
+
+        public async Task SetCursorPositionAsync(int left, int top)
+        {
+            await SetCursorPositionAsync(left, top, CancellationToken.None);
+        }
+
+        public void SetCursorPosition(int left, int top, CancellationToken cancellationToken)
+        {
+            s_stdInHandle.Wait(cancellationToken);
+            try
+            {
+                System.Console.SetCursorPosition(left, top);
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public async Task SetCursorPositionAsync(int left, int top, CancellationToken cancellationToken)
+        {
+            await s_stdInHandle.WaitAsync(cancellationToken);
+            try
+            {
+                System.Console.SetCursorPosition(left, top);
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public void Write(char value)
+        {
+            Write(value, CancellationToken.None);
+        }
+
+        public async Task WriteAsync(char value)
+        {
+            await WriteAsync(value, CancellationToken.None);
+        }
+
+        public void Write(char value, CancellationToken cancellationToken)
+        {
+            s_stdInHandle.Wait(cancellationToken);
+            try
+            {
+                System.Console.Write(value);
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public async Task WriteAsync(char value, CancellationToken cancellationToken)
+        {
+            await s_stdInHandle.WaitAsync(cancellationToken);
+            try
+            {
+                System.Console.Write(value);
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public void Write(string value)
+        {
+            Write(value, CancellationToken.None);
+        }
+
+        public async Task WriteAsync(string value)
+        {
+            await WriteAsync(value, CancellationToken.None);
+        }
+
+        public void Write(string value, CancellationToken cancellationToken)
+        {
+            s_stdInHandle.Wait(cancellationToken);
+            try
+            {
+                System.Console.Write(value);
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public async Task WriteAsync(string value, CancellationToken cancellationToken)
+        {
+            await s_stdInHandle.WaitAsync(cancellationToken);
+            try
+            {
+                System.Console.Write(value);
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public int GetWindowLeft()
+        {
+            return GetWindowLeft(CancellationToken.None);
+        }
+
+        public async Task<int> GetWindowLeftAsync()
+        {
+            return await GetWindowLeftAsync(CancellationToken.None);
+        }
+
+        public int GetWindowLeft(CancellationToken cancellationToken)
+        {
+            s_stdInHandle.Wait(cancellationToken);
+            try
+            {
+                return System.Console.WindowLeft;
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public async Task<int> GetWindowLeftAsync(CancellationToken cancellationToken)
+        {
+            await s_stdInHandle.WaitAsync(cancellationToken);
+            try
+            {
+                return System.Console.WindowLeft;
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public int GetWindowTop()
+        {
+            return GetWindowTop(CancellationToken.None);
+        }
+
+        public async Task<int> GetWindowTopAsync()
+        {
+            return await GetWindowTopAsync(CancellationToken.None);
+        }
+
+        public int GetWindowTop(CancellationToken cancellationToken)
+        {
+            s_stdInHandle.Wait(cancellationToken);
+            try
+            {
+                return System.Console.WindowTop;
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public async Task<int> GetWindowTopAsync(CancellationToken cancellationToken)
+        {
+            await s_stdInHandle.WaitAsync(cancellationToken);
+            try
+            {
+                return System.Console.WindowTop;
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public int GetWindowWidth()
+        {
+            return GetWindowWidth(CancellationToken.None);
+        }
+
+        public async Task<int> GetWindowWidthAsync()
+        {
+            return await GetWindowWidthAsync(CancellationToken.None);
+        }
+
+        public int GetWindowWidth(CancellationToken cancellationToken)
+        {
+            s_stdInHandle.Wait(cancellationToken);
+            try
+            {
+                return System.Console.WindowWidth;
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
+
+        public async Task<int> GetWindowWidthAsync(CancellationToken cancellationToken)
+        {
+            await s_stdInHandle.WaitAsync(cancellationToken);
+            try
+            {
+                return System.Console.WindowWidth;
+            }
+            finally
+            {
+                s_stdInHandle.Release();
+            }
+        }
     }
 }
