@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Management.Automation;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -46,7 +47,7 @@ namespace Microsoft.PowerShell.EditorServices.Handlers
             // TODO: What do we do with the arguments?
             DocumentSelector = LspUtils.PowerShellDocumentSelector,
             ResolveProvider = true,
-            TriggerCharacters = new[] { ".", "-", ":", "\\", "$" }
+            TriggerCharacters = new[] { ".", "-", ":", "\\", "$", " " }
         };
 
         public override async Task<CompletionList> Handle(CompletionParams request, CancellationToken cancellationToken)
@@ -55,11 +56,23 @@ namespace Microsoft.PowerShell.EditorServices.Handlers
             int cursorColumn = request.Position.Character + 1;
 
             ScriptFile scriptFile = _workspaceService.GetFile(request.TextDocument.Uri);
-            IEnumerable<CompletionItem> completionResults = await GetCompletionsInFileAsync(
-                scriptFile,
-                cursorLine,
-                cursorColumn,
-                cancellationToken).ConfigureAwait(false);
+            IEnumerable<CompletionItem> completionResults = null;
+            try
+            {
+                using (cancellationToken.Register(() => Debug.WriteLine("Was cancelled. {0}", cancellationToken.IsCancellationRequested)))
+                {
+                    Debug.WriteLine("Handle started");
+                    completionResults = await GetCompletionsInFileAsync(
+                        scriptFile,
+                        cursorLine,
+                        cursorColumn,
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                Debug.WriteLine("Handle completed, is not null: {0}", completionResults is not null);
+            }
 
             return new CompletionList(completionResults);
         }

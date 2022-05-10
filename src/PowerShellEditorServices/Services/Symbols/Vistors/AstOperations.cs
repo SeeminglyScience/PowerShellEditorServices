@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.PowerShell.EditorServices.Services.PowerShell;
 using Microsoft.PowerShell.EditorServices.Services.PowerShell.Execution;
+using Microsoft.PowerShell.EditorServices.Services.PowerShell.Host;
 
 namespace Microsoft.PowerShell.EditorServices.Services.Symbols
 {
@@ -83,26 +84,66 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
                     cursorPosition.LineNumber,
                     cursorPosition.ColumnNumber));
 
+            Debug.WriteLine(
+                string.Format(
+                    "Getting completions at offset {0} (line: {1}, column: {2})",
+                    fileOffset,
+                    cursorPosition.LineNumber,
+                    cursorPosition.ColumnNumber));
+
             Stopwatch stopwatch = new();
 
             CommandCompletion commandCompletion = null;
-            await executionService.ExecuteDelegateAsync(
-                representation: "CompleteInput",
-                new ExecutionOptions { Priority = ExecutionPriority.Next },
-                (pwsh, _) =>
+            try
+            {
+                if (((PsesInternalHost)executionService).CurrentFrame.IsRemote)
                 {
-                    stopwatch.Start();
-                    commandCompletion = CommandCompletion.CompleteInput(
-                        scriptAst,
-                        currentTokens,
-                        cursorPosition,
-                        options: null,
-                        powershell: pwsh);
-                },
-                cancellationToken)
-                .ConfigureAwait(false);
+                    await executionService.ExecuteDelegateAsync(
+                        representation: "CompleteInput",
+                        new ExecutionOptions { Priority = ExecutionPriority.Next },
+                        (pwsh, _) =>
+                        {
+                            stopwatch.Start();
+                            commandCompletion = CommandCompletion.CompleteInput(
+                                scriptAst,
+                                currentTokens,
+                                cursorPosition,
+                                options: null,
+                                powershell: pwsh);
+                        },
+                        cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    IReadOnlyList<CommandCompletion> result = await executionService.ExecutePSCommandAsync<CommandCompletion>(
+                        new PSCommand()
+                            .AddCommand("TabExpansion2")
+                            .AddParameter("ast", scriptAst)
+                            .AddParameter("tokens", currentTokens)
+                            .AddParameter("positionOfCursor", cursorPosition),
+                        cancellationToken)
+                        .ConfigureAwait(false);
 
-            stopwatch.Stop();
+                    if (result is { Count: > 0 })
+                    {
+                        commandCompletion = result[0];
+                    }
+                }
+
+                stopwatch.Stop();
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine("~~Completions failed or cancelled {0}: {1}.~~", e.GetType().Name, e.Message);
+                return null;
+            }
+            finally
+            {
+                Debug.WriteLine("Finally hit, is not null: {0}", commandCompletion is not null);
+            }
+
+            Debug.WriteLine("Completions returned successfully {0}", commandCompletion is not null);
             logger.LogTrace($"IntelliSense completed in {stopwatch.ElapsedMilliseconds}ms.");
 
             return commandCompletion;
