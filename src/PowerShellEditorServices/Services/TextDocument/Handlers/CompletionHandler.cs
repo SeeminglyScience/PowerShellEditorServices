@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Management.Automation;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -30,6 +31,7 @@ namespace Microsoft.PowerShell.EditorServices.Handlers
         private readonly IRunspaceContext _runspaceContext;
         private readonly IInternalPowerShellExecutionService _executionService;
         private readonly WorkspaceService _workspaceService;
+        private CompletionCapability _completionCapability;
 
         public PsesCompletionHandler(
             ILoggerFactory factory,
@@ -43,13 +45,19 @@ namespace Microsoft.PowerShell.EditorServices.Handlers
             _workspaceService = workspaceService;
         }
 
-        protected override CompletionRegistrationOptions CreateRegistrationOptions(CompletionCapability capability, ClientCapabilities clientCapabilities) => new()
+        protected override CompletionRegistrationOptions CreateRegistrationOptions(CompletionCapability capability, ClientCapabilities clientCapabilities)
         {
-            // TODO: What do we do with the arguments?
-            DocumentSelector = LspUtils.PowerShellDocumentSelector,
-            ResolveProvider = true,
-            TriggerCharacters = new[] { ".", "-", ":", "\\", "$", " " }
-        };
+            _completionCapability = capability;
+            return new CompletionRegistrationOptions()
+            {
+                // TODO: What do we do with the arguments?
+                DocumentSelector = LspUtils.PowerShellDocumentSelector,
+                ResolveProvider = true,
+                TriggerCharacters = new[] { ".", "-", ":", "\\", "$", " " },
+            };
+        }
+
+        public bool SupportsMarkdown => _completionCapability?.CompletionItem?.DocumentationFormat?.Contains(MarkupKind.Markdown) is true;
 
         public override async Task<CompletionList> Handle(CompletionParams request, CancellationToken cancellationToken)
         {
@@ -72,6 +80,47 @@ namespace Microsoft.PowerShell.EditorServices.Handlers
         // Handler for "completionItem/resolve". In VSCode this is fired when a completion item is highlighted in the completion list.
         public override async Task<CompletionItem> Handle(CompletionItem request, CancellationToken cancellationToken)
         {
+            if (SupportsMarkdown)
+            {
+                if (request.Kind is CompletionItemKind.Method)
+                {
+                    return request with
+                    {
+                        // Detail = request.Data.ToString().Replace("\r\n", "\r\n\r\n"),
+                        Documentation = new MarkupContent()
+                        {
+                            Kind = MarkupKind.Markdown,
+                            Value = $"```csharp\r\n{request.Data.ToString().Replace("\r\n", ";\r\n\r\n")}\r\n```",
+                        },
+                        // Documentation = request.Data.ToString().Replace("\r\n", "\r\n\r\n").Replace("(", "(\u200B"),
+                    };
+                }
+
+                if (request.Kind is CompletionItemKind.Class or CompletionItemKind.TypeParameter or CompletionItemKind.Enum)
+                {
+                    return request with
+                    {
+                        Documentation = new MarkupContent()
+                        {
+                            Kind = MarkupKind.Markdown,
+                            Value = $"```powershell\n[{request.Detail}]\n```",
+                        },
+                    };
+                }
+
+                if (request.Kind is CompletionItemKind.EnumMember or CompletionItemKind.Property or CompletionItemKind.Field)
+                {
+                    return request with
+                    {
+                        Documentation = new MarkupContent()
+                        {
+                            Kind = MarkupKind.Markdown,
+                            Value = $"```csharp\n{request.Detail}\n```",
+                        },
+                    };
+                }
+            }
+
             // We currently only support this request for anything that returns a CommandInfo:
             // functions, cmdlets, aliases. No detail means the module hasn't been imported yet and
             // IntelliSense shouldn't import the module to get this info.
@@ -143,6 +192,14 @@ namespace Microsoft.PowerShell.EditorServices.Handlers
                 result.ReplacementIndex,
                 result.ReplacementIndex + result.ReplacementLength);
 
+            string textToBeReplaced = string.Empty;
+            if (result.ReplacementLength is not 0)
+            {
+                textToBeReplaced = scriptFile.Contents.Substring(
+                    result.ReplacementIndex,
+                    result.ReplacementLength);
+            }
+
             bool isIncomplete = false;
             // Create OmniSharp CompletionItems from PowerShell CompletionResults. We use a for loop
             // because the index is used for sorting.
@@ -159,16 +216,22 @@ namespace Microsoft.PowerShell.EditorServices.Handlers
                     isIncomplete = true;
                 }
 
-                completionItems[i] = CreateCompletionItem(result.CompletionMatches[i], replacedRange, i + 1);
+                completionItems[i] = CreateCompletionItem(
+                    result.CompletionMatches[i],
+                    replacedRange,
+                    i + 1,
+                    textToBeReplaced);
+
                 _logger.LogTrace("Created completion item: " + completionItems[i] + " with " + completionItems[i].TextEdit);
             }
             return new CompletionResults(isIncomplete, completionItems);
         }
 
-        internal static CompletionItem CreateCompletionItem(
+        internal CompletionItem CreateCompletionItem(
             CompletionResult result,
             BufferRange completionRange,
-            int sortIndex)
+            int sortIndex,
+            string textToBeReplaced)
         {
             Validate.IsNotNull(nameof(result), result);
 
@@ -200,7 +263,9 @@ namespace Microsoft.PowerShell.EditorServices.Handlers
                     ? string.Empty : detail, // Don't repeat label.
                 // Retain PowerShell's sort order with the given index.
                 SortText = $"{sortIndex:D4}{result.ListItemText}",
-                FilterText = result.CompletionText,
+                FilterText = result.ResultType is CompletionResultType.Type
+                    ? GetTypeFilterText(textToBeReplaced, result.CompletionText)
+                    : result.CompletionText,
                 // Used instead of Label when TextEdit is unsupported
                 InsertText = result.CompletionText,
                 // Used instead of InsertText when possible
@@ -222,7 +287,14 @@ namespace Microsoft.PowerShell.EditorServices.Handlers
                     }
                     : item with { Kind = CompletionItemKind.Folder },
                 CompletionResultType.Property => item with { Kind = CompletionItemKind.Property },
-                CompletionResultType.Method => item with { Kind = CompletionItemKind.Method },
+                CompletionResultType.Method => item with
+                {
+                    Kind = CompletionItemKind.Method,
+                    Data = item.Detail,
+                    Detail = SupportsMarkdown && item.Detail.IndexOf('(') is int index and not -1
+                        ? item.Detail.Substring(0, index + 1)
+                        : item.Detail,
+                },
                 CompletionResultType.ParameterName => TryExtractType(detail, out string type)
                     ? item with { Kind = CompletionItemKind.Variable, Detail = type }
                     // The comparison operators (-eq, -not, -gt, etc) unfortunately come across as
@@ -237,12 +309,53 @@ namespace Microsoft.PowerShell.EditorServices.Handlers
                 CompletionResultType.Type => detail.StartsWith("Class ", StringComparison.CurrentCulture)
                     // Custom classes come through as types but the PowerShell completion tooltip
                     // will start with "Class ", so we can more accurately display its icon.
-                    ? item with { Kind = CompletionItemKind.Class }
-                    : item with { Kind = CompletionItemKind.TypeParameter },
+                    ? item with { Kind = CompletionItemKind.Class, Detail = detail.Substring("Class ".Length) }
+                    : detail.StartsWith("Enum ", StringComparison.CurrentCulture)
+                        ? item with { Kind = CompletionItemKind.Enum, Detail = detail.Substring("Enum ".Length) }
+                        : item with { Kind = CompletionItemKind.TypeParameter },
                 CompletionResultType.Keyword or CompletionResultType.DynamicKeyword =>
                     item with { Kind = CompletionItemKind.Keyword },
                 _ => throw new ArgumentOutOfRangeException(nameof(result))
             };
+        }
+
+        private static string GetTypeFilterText(string textToBeReplaced, string completionText)
+        {
+            // FilterText for a type name with using statements gets a little complicated. Consider
+            // this script:
+            //
+            // using namespace System.Management.Automation
+            // [System.Management.Automation.Tracing.]
+            //
+            // Since we're emitting an edit that replaces `System.Management.Automation.Tracing.` with
+            // `Tracing.NullWriter` (for example), we can't use CompletionText as the filter. If we
+            // do, we won't find any matches because it's trying to filter `Tracing.NullWriter` with
+            // `System.Management.Automation.Tracing.` which is too different. So we prepend each
+            // namespace that exists in our original text but does not in our completion text.
+            if (!textToBeReplaced.Contains('.'))
+            {
+                return completionText;
+            }
+
+            string[] oldTypeParts = textToBeReplaced.Split('.');
+            string[] newTypeParts = completionText.Split('.');
+
+            StringBuilder newFilterText = new(completionText);
+
+            int newPartsIndex = newTypeParts.Length - 2;
+            for (int i = oldTypeParts.Length - 2; i >= 0; i--)
+            {
+                if (newPartsIndex is >= 0
+                    && newTypeParts[newPartsIndex].Equals(oldTypeParts[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    newPartsIndex--;
+                    continue;
+                }
+
+                newFilterText.Insert(0, '.').Insert(0, oldTypeParts[i]);
+            }
+
+            return newFilterText.ToString();
         }
 
         private static readonly Regex s_typeRegex = new(@"^(\[.+\])", RegexOptions.Compiled);
